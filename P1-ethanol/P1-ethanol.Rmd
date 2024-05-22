@@ -1,0 +1,205 @@
+---
+title: "P1-ethanol"
+author: "Aidan Burk"
+date: "2024-04-28"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE, purl=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r metadata, echo=FALSE}
+# Author:  Aidan Burk
+# Date:    2024-04-28
+# Purpose: Portfolio 1 - Ethanol Assignment rmd file
+#-------------------------------------------------------------------------------
+```
+
+```{r packages, include=FALSE}
+# Load packages
+library("tidyverse")
+library("knitr")
+library("ggResidpanel")
+```
+
+```{r load data}
+# Read & clean data
+gas_mileage <- read.csv('gas_mileage_data.csv') |>
+  drop_na(c(mpg, ethanol)) |> # remove rows with NA mpg/ethanol
+  mutate(
+    ethanol = ifelse(ethanol == 10,
+                     yes = '10 %',
+                     no  = '0 %') # rewrite 0/10 values in ethanol as Yes/No
+  )
+```
+
+## Introduction
+
+gas_mileage_data.csv consists of data that Professor Jarad Niemi
+collected on `r nrow(gas_mileage)` trips made on his 2011 Toyota Sienna.
+At each gas fill up, he recorded the number of miles on the trip meter
+(then reset the trip meter) as well as the amount of gas and the type of
+gas in terms of the octane and ethanol percentage. This analysis is
+meant to answer the question: How is gas mileage (miles per gallon)
+different when using gas with no ethanol compared to gas with 10%
+ethanol?
+
+## Data
+
+```{r summary-statistics}
+s <- gas_mileage |>
+  group_by(ethanol) |>
+  summarize(Obervations    = n(),
+            `Mean mpg` = mean(mpg),
+            `Sd mpg`   = sd(mpg),
+            .groups = 'drop')
+```
+
+```{r summary-statistics-table}
+# Create HTML table from summary statistics}
+s |>
+  rename(Ethanol = ethanol) |>
+  knitr::kable(
+    caption = "Summary of miles per gallon for gas with no ethanol & gas with 10% ethanol",
+    # label   = "summary-statistics",
+    align   = c("rlll")) # Column alignment: [r]ight or [l]eft
+```
+
+The figure below displays a scatterplot of each trip's mileage versus
+type of gas (No ethanol or 10% ethanol). When comparing gas with no
+ethanol to gas with 10% ethanol, this figure suggests gas with no
+ethanol has slightly higher mean mpg, with a range of
+`r gas_mileage |> filter(ethanol == '0 %') |> pull(mpg) |> min() |> round(2)` to
+`r gas_mileage |> filter(ethanol == '0 %') |> pull(mpg) |> max() |> round(2)`, which
+is wider than the range of gas with 10% ethanol
+(`r gas_mileage |> filter(ethanol == '10 %') |> pull(mpg) |> min() |> round(2)` to
+`r gas_mileage |> filter(ethanol == '10 %') |> pull(mpg) |> max() |> round(2)`).
+
+```{r plot}
+# Create exploratory scatterplot
+ggplot(gas_mileage,
+       aes(x = ethanol, 
+           y = mpg)) + 
+  geom_jitter(height = 0,
+              width  = 0.1,
+              color = '#101020',
+              size = 1) +
+  labs(title = 'Scatterplot - Mileage by Type of Gas',
+       x = 'Type of gas (Ethanol percentage)',
+       y = 'Miles per gallon (mpg)') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+## Results
+
+```{r model}
+# Fit regression model of the logarithm of mpg on ethanol
+m <- lm(log(mpg) ~ ethanol, 
+         data = gas_mileage)
+```
+
+Because the explanatory variable (Type of gas) is categorical, & the
+residuals have a skewed distribution, we will fit a log-linear
+regression model for the logarithm of miles per gallon on type of gas.
+The structure of the logarthimic regression model is
+$$log(Y_i)=\beta_0+\beta_1X_i+\epsilon_i$$ where $Y_i$ is miles per
+gallon, $X_i$ is the type of gas (0% = 0, 10% = 1), & $\epsilon_i$
+is the error.
+
+The 95% confidence interval for the multiplicative effect of mpg when
+the gas has ethanol compared to when it does not is
+`r exp(confint(m)[2,]) |> round(2)`. This suggests that with 95%
+confidence, the multiplicative change in mpg from having no ethanol to
+having 10% ethanol $e^{\beta_0}$ is between
+`r exp(confint(m)[2,1]) |> round(2)` &
+`r exp(confint(m)[2,2]) |> round(2)`.
+
+Diagnostic plots are included below to help evaluate model assumptions.
+
+```{r diagnostic plots}
+# Create panel of diagnostic plots
+resid_panel(m,
+            plots = c("resid",
+                      "index",
+                      "qq",
+                      "cookd"))
+```
+
+Below is a plot of the estimated mean miles per gallon with 95%
+confidence intervals. As seen with the original data, mpg generally
+decreases a slight amount when the type of gas has 10% ethanol compared
+to no ethanol.
+
+```{r predictions}
+# Create data frame with unique explanatory variable values
+nd <- gas_mileage |>
+  select(ethanol) |>
+  unique()
+
+# Predict
+p <- bind_cols(
+  nd,
+  predict(m,
+          newdata = nd,
+          se.fit = TRUE)|>
+      as.data.frame() |>
+      
+      # Manually construct confidence intervals
+      mutate(
+        lwr = fit - qnorm(0.975) * se.fit,
+        upr = fit + qnorm(0.975) * se.fit,
+        
+        # Exponentiate to get to response scale
+        mpg = exp(fit),
+        lwr    = exp(lwr),
+        upr    = exp(upr)
+      ) 
+  )
+
+# Plot group estimates
+ggplot(p,
+       aes(x = ethanol,
+           y = mpg,
+           group = 1,
+           ymin = lwr,
+           ymax = upr)) + 
+  geom_pointrange(color = '#101020') +
+  geom_text(data = p,
+            mapping = aes(x = ethanol, label = round(mpg, 2), y = mpg),
+            vjust = -.8, hjust = -.2, size = 8/.pt) +
+  geom_line() +
+  labs(title = 'Estimated Mean Mileage (mpg) with 95% Confidence Intervals',
+       subtitle = 'Log-linear Regression Model',
+       x = 'Type of gas (Ethanol percentage)',
+       y = 'Miles per gallon (mpg)') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5),
+        plot.subtitle = element_text(hjust = 0.5))
+
+```
+
+## Discussion
+
+Using data obtained from car trips made on Professor Niemi's 2011 Toyota
+Sienna, recording number of miles and type of gas at each gas fill up,
+we performed simple linear regression analysis, modelling the logarithm
+of miles per gallon on type of gas. We found that when comparing the two
+types of gas, gas with 10% ethanol is associated with a generally lower
+mileage than for gas with no ethanol.
+
+Since the data were recorded in temporal order, there is no chance for
+our assumption of independence to be violated, and our diagnostic plots
+show no change in residuals due to time. The normality assumption is
+reasonably met as indicated by a normal quantile-quantile plot. Our
+assumption of constant variance is also reasonably met as the residuals
+show little to no variability.
+
+Because the type of gas selected at each gas fill up was not randomized, our results on the effect of type of gas on mileage cannot be interpreted as causal. Since the trips made on Professor Niemi's 2011 Toyota
+Sienna are not a random sample from any population, we cannot justifiably extend these results to a larger population.
+
