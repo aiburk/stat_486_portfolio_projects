@@ -1,0 +1,281 @@
+---
+title: "P3-monte_carlo"
+author: "Aidan Burk"
+date: "2024-05-06"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE, purl=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r metadata, echo=FALSE}
+# Author:  Aidan Burk
+# Date:    2024-05-06
+# Purpose: Portfolio 3 - Monte Carlo Assignment rmd file
+#-------------------------------------------------------------------------------
+```
+
+```{r packages, include=FALSE}
+# Load packages
+library("tidyverse")
+library("knitr")
+library("ggResidpanel")
+library("MASS")
+```
+
+```{r functions}
+# Function to calculate Monte Carlo expectation with standard error
+mc_expectation <- function(x) {
+  return(
+    c(mean = mean(x),
+      se   = sd(x)/sqrt(length(x)))
+  )
+}
+```
+
+```{r create-data}
+# Create data frame from all combinations of n, p, and estimator type
+combos <- expand.grid(
+  n = c(seq(5, 30, 5)),
+  p = c(seq(0.1, 0.9, 0.1)),
+  type = c('frequentist', 'Bayesian')
+)
+# Loop through data frame & calculate MSE, coverage, & standard error variables
+# for each combination
+for (row in 1:nrow(combos)) {
+  ### Frequentist approach
+  if(combos$type[row] == 'frequentist') {
+    # Set parameters for calculating MSE
+    n     <- combos$n[row]
+    p     <- combos$p[row]
+    x     <- rbinom(1e4, size = n, prob = p) # Simulations
+    p_hat <- x / n # Point estimator
+    ### Mean squared error (MSE) of the MLE estimator
+    combos$mse[row] <- mc_expectation((p_hat - p)^2)[1]
+    ### Standard Error of MSE
+    combos$mse_se[row] <- mc_expectation((p_hat-p)^2)[2]
+    # Set parameters for calculating coverage
+    alpha <- .05 # 95% confidence
+    z     <- qnorm(1-alpha/2)
+    d     <- data.frame(x)
+    ci    <- d |> rowwise() |> 
+      mutate(p_hat = x / n,
+             lcl   = p_hat - z * sqrt(p_hat*(1-p_hat)/n),
+             ucl   = p_hat + z * sqrt(p_hat*(1-p_hat)/n),
+             Wald  = lcl < p & p < ucl) # Confidence Interval
+    ### Coverage of the 95% asymptotic confidence interval
+    combos$coverage[row] <- mean(ci$Wald)
+    ### Standard Error of the coerage estimator
+    combos$coverage_se[row] <- mc_expectation(ci$Wald)[2]
+    }
+  ### Bayesian approach
+  else if (combos$type[row] == 'Bayesian') {
+    # Set parameters for calculating MSE
+    n     <- combos$n[row]
+    p     <- combos$p[row]
+    x     <- rbinom(1e4, size = n, prob = p) # Simulations
+    p_hat <- (0.5 + x) / (1 + n) # Point estimator
+    ### Mean squared error (MSE) of the Bayes estimator
+    combos$mse[row] <- mc_expectation((p_hat - p)^2)[1]
+    ### Standard error of MSE
+    combos$mse_se[row] <- mc_expectation((p_hat - p)^2)[2]
+    # Set parameters for calculating coverage
+    alpha      <- .05 # 95% confidence
+    lowerbound <- qbeta(alpha/2, 0.5 + x, 0.5 + n - x)
+    upperbound <- qbeta(1-alpha/2, 0.5 + x, 0.5 + n - x)
+    coverage   <- lowerbound < p & p < upperbound
+    ### Coverage of a 95% Bayes interval
+    combos$coverage[row] <- mean(coverage)
+    ### Standard Error of the coverage estimator
+    combos$coverage_se[row] <- mc_expectation(coverage)[2]
+  }
+}
+
+```
+
+## Introduction
+
+The goal of this study is to compare two different approaches to point
+estimation, the *frequentist* and *Bayesian* approach.
+
+We will study point estimators and interval estimators for the binomial
+model with unknown probability of success: $$Y \sim Bin(n, p)$$
+
+In the frequentist approach, we will base the point estimator on the
+maximum likelihood estimator (MLE): $$\hat{p}_{MLE} = \frac{y}{n}$$ as
+well as an asymptotic confidence interval:
+$$\hat{p}_{MLE} \pm z_{\alpha/2}\sqrt{\frac{\hat{p}_{MLE}(1-\hat{p}_{MLE})}{n}}$$
+
+Using the Bayesian approach, the point estimator will be:
+$$\hat{p}_{Bayes} = \frac{0.5+y}{1+n}$$ with an interval estimator that
+cannot be easily written down, but can be easily computed in R using the
+code:
+
+```{r eval=FALSE, echo=TRUE}
+# Compute both endpoints of a Bayesian credible interval
+alpha <- 0.05 # for a 95% interval
+qbeta(c(alpha/2, 1-alpha/2), 0.5 + y, 0.5 + n - y)
+```
+
+To compare both estimators, we will compute the mean squared error (MSE)
+of the point estimators: $$MSE(\hat{p}) = E[(\hat{p}-p)^2]$$ and the
+coverage of the interval estimators, the probability the interval will
+contain the truth under repeated realizations of the data, with 95%
+confidence.
+
+For both estimators, we will compute MSE and coverage for Monte Carlo
+simulations with every combination of the following values for n (Number
+of trials) and p (Probability of success):
+
+• n: 5, 10, 15, 20, 25, 30
+
+• p: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+
+## Analysis
+
+The figure below is a faceted scatterplot that compares the MSE of the
+frequentist and Bayesian point estimators by set values for p, and with
+each subplot representing a different set value for n. The plot shows
+across all values of n that as the probability of success gets
+increasingly closer to 0 or 1, the MSE gets closer to 0, with MSE
+maximized at p = 0.5. The range of MSE is notably largest at the lowest
+value of n (n = 5), with the frequentist point estimator MSE having a
+larger range and larger values overall compared to the Bayesian
+estimator, and as n increases, the range of MSE decreases, the values
+get closer to 0, and the difference between the MSEs of the 2 estimators
+lessens, becoming about equal at higher n values.
+
+```{r mse-plot}
+# Create mse faceted scatterplots
+mse_plot <- ggplot(combos,
+                   aes(x = p,
+                       y = mse,
+                       color = type)) + 
+  geom_point(position = position_jitter(width = 0.015),
+             alpha = 0.7) +
+  labs(title = 'Scatterplots - Probability of Success (p) by Mean Squared Error (MSE),\nEstimator Type, & Number of Trials (n)',
+       x = 'p',
+       y = 'MSE',
+       color = 'Estimator') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("plum1", "plum4")) +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  facet_wrap( ~ n, labeller = 'label_both')
+
+mse_plot
+```
+
+To assess the Monte Carlo uncertainty for the MSE, a similar faceted
+scatterplot below shows Monte Carlo standard errors of the MSE for each
+combination of n and p. It shows a similar spread to what's shown on the
+MSE plot, which would indicate that higher MSE is associated with higher
+standard errors, meaning more uncertainty and larger estimate intervals.
+Bayesian estimators have lower standard error than frequentist
+estimators for lower values of n which means less uncertainty overall.
+
+```{r mse-se-plot}
+# Create MSE standard error faceted scatterplot
+mse_se_plot <- ggplot(combos,
+                  aes(x = p,
+                      y = mse_se,
+                      color = type)) + 
+  geom_point(position = position_jitter(width = 0.015),
+             alpha = 0.7) +
+  labs(title = 'Scatterplots - Probability of Success (p) by Monte Carlo Standard Error of MSE,\nEstimator Type, & Number of Trials (n)',
+       x = 'p',
+       y = 'Standard Error',
+       color = 'Estimator') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("plum1", "plum4")) +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  facet_wrap( ~ n, labeller = 'label_both')
+
+mse_se_plot
+```
+
+The following figure below is a faceted scatterplot that compares the
+coverage probabilities of the frequentist and Bayesian point estimators
+by set values for p, and with each subplot representing a different set
+value for n. In the plot, the difference in coverage probabilities
+between the frequentist and Bayesian estimators is striking. For
+Bayesian estimators, the coverage probabilities are larger when p is
+close to 0 or 1 for smaller values of n, with an overall high minimum
+probability of
+`r combos |> filter(type == 'Bayesian') |> pull(coverage) |> min() |> round(2)`
+even at small sizes. For frequentist estimators, the coverage
+probabilities are smaller when p is close to 0 or 1, with much larger
+ranges at smaller n sizes as low as
+`r combos |> filter(type == 'frequentist') |> pull(coverage) |> min() |> round(2)`.
+Coverage probabilities generally increase and the difference between
+estimators lessens as n increases, but frequentist estimators still
+remain lower in coverage probability overall.
+
+```{r coverage-plot}
+# Create coverage faceted scatterplots
+coverage_plot <- ggplot(combos,
+                   aes(x = p,
+                       y = coverage,
+                       color = type)) + 
+  geom_point(position = position_jitter(width = 0.015),
+             alpha = 0.7) +
+  labs(title = 'Scatterplots - Probability of Success (p) by Coverage,\nEstimator Type, & Number of Trials (n)',
+       x = 'p',
+       y = 'Coverage',
+       color = 'Estimator') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("plum1", "plum4")) +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  facet_wrap( ~ n, labeller = 'label_both')
+
+coverage_plot
+```
+
+To assess the Monte Carlo uncertainty for the coverage estimate, a
+similar faceted scatterplot below shows Monte Carlo standard errors of
+the coverage for each combination of n and p. This plot, when compared
+with the coverage plot, shows that higher coverage probability estimates
+are associated with lower standard error. Bayesian estimators have
+lower standard error than frequentist estimators for lower values of n
+which means less uncertainty overall.
+
+```{r coverage-se-plot}
+# Create coverage standard error faceted scatterplot
+coverage_se_plot <- ggplot(combos,
+                  aes(x = p,
+                      y = coverage_se,
+                      color = type)) + 
+  geom_point(position = position_jitter(width = 0.015),
+             alpha = 0.7) +
+  labs(title = 'Scatterplots - Probability of Success (p) by Monte Carlo Standard Error of Coverage,\nEstimator Type, & Number of Trials (n)',
+       x = 'p',
+       y = 'Standard Error',
+       color = 'Estimator') +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values=c("plum1", "plum4")) +
+  scale_x_continuous(breaks = seq(0.1, 0.9, 0.2)) +
+  facet_wrap( ~ n, labeller = 'label_both')
+
+coverage_se_plot
+```
+
+## Discussion
+
+With the goal of comparing frequentist and Bayesian approaches to point
+estimation and interval estimation for the binomial model, we ran Monte Carlo simulations for both approaches and for each combination of set binomial model
+parameters:
+
+• n: 5, 10, 15, 20, 25, 30
+
+• p: 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9
+
+From the simulations, we computed the mean squared error (MSE) of the point estimators and the coverage probability of the interval estimators, as well as Monte Carlo standard errors for both estimates.
+
+Visualizations show how MSE and coverage differ between the estimator types, with Bayesian estimators tending to have lower MSE and higher coverage estimates compared to frequentist estimators at lower n values. Bayesian estimators also showed less uncertainty for both estimates at lower n values, with lower Monte Carlo standard error overall. As n increases, these differences lessen and the MSE and coverage estimates for both estimator types become closer to agreeing in results, so if we are looking for estimates for the binomial model with a small number of trials, the Bayesian approach may be preferred.
