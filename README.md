@@ -1,9 +1,6 @@
 ## STAT 486 Portfolio Projects
 A repository of final data analysis portfolio projects I completed for STAT 486 - Introduction to Statistical Computing at Iowa State University in Spring 2024.
 
-The projects were small-scale, 
-but I am glad to have had the opportunity to develop these tangible portfolios that showcase my statistical computing capabilties.  
-
 ## Portfolio 1 - Ethanol
 For this project I analyzed gas mileage data provided by the professor (__gas_mileage_data.csv__).
 
